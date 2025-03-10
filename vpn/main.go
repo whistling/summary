@@ -1,44 +1,49 @@
 package main
 
 import (
+	"flag"
 	"fmt"
-	"net/url"
-
-	"golang.org/x/net/proxy"
+	"log"
+	"os"
+	"os/signal"
+	"syscall"
 )
 
-// 检测vpn 是否可用
-func checkSocks5Proxy(proxyAddr, proxyPort, username, password string) error {
-	proxyURL, err := url.Parse(fmt.Sprintf("socks5://%s:%s@%s:%s", username, password, proxyAddr, proxyPort))
-	if err != nil {
-		return err
-	}
-
-	dialer, err := proxy.FromURL(proxyURL, proxy.Direct)
-	if err != nil {
-		return err
-	}
-	// ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	// defer cancel()
-	// Replace DialContext with Dial since proxy.Dialer doesn't support DialContext
-	conn, err := dialer.Dial("tcp", "www.google.com:80")
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-
-	fmt.Println("Socks5 proxy connection successful!")
-	return nil
-}
-
 func main() {
-	proxyAddr := "127.0.0.1" // 替换为你的代理地址
-	proxyPort := "7890"      // 替换为你的代理端口
-	username := ""           // 替换为你的代理用户名
-	password := ""           // 替换为你的代理密码
+	// 使用独立的FlagSet来避免与trojan-go包的flag冲突
+	flags := flag.NewFlagSet("vpn", flag.ExitOnError)
+	configPath := flags.String("config", "config.json", "配置文件路径")
+	flags.Parse(os.Args[1:])
 
-	err := checkSocks5Proxy(proxyAddr, proxyPort, username, password)
+	// 加载配置文件
+	config, err := LoadConfig(*configPath)
 	if err != nil {
-		fmt.Println("Socks5 proxy connection failed:", err)
+		log.Fatalf("加载配置文件失败: %v", err)
 	}
+
+	// 创建代理管理器
+	manager, err := NewProxyManager(config)
+	if err != nil {
+		log.Fatalf("创建代理管理器失败: %v", err)
+	}
+
+	// 启动代理管理器
+	if err := manager.Start(); err != nil {
+		log.Fatalf("启动代理管理器失败: %v", err)
+	}
+
+	// 等待中断信号
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	// 打印启动信息
+	fmt.Println("代理管理器已启动，按 Ctrl+C 停止...")
+
+	// 等待中断信号
+	<-sigChan
+
+	// 优雅关闭
+	fmt.Println("\n正在关闭代理管理器...")
+	manager.Stop()
+	fmt.Println("代理管理器已关闭")
 }
